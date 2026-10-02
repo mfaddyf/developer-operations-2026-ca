@@ -1,4 +1,3 @@
-
 import boto3
 
 user_data = """#!/bin/bash
