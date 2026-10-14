@@ -1,4 +1,5 @@
 import boto3
+import uuid # imported so i don't have to manually add in a bucket name every time...
 
 user_data = """#!/bin/bash
             yum install httpd -y
@@ -35,5 +36,21 @@ instance.reload()
 print('Instance Running...')
 
 # --- buckets below
+bucket_name = f'mroche-devops-{uuid.uuid4().hex[:5]}'
 s3 = boto3.resource('s3')
 
+try:
+	s3.create_bucket(Bucket=bucket_name)
+except Exception as error:
+	print('Could not create bucket: ', error)
+	
+website_configuration = {
+    'ErrorDocument': {'Key': 'error.html'},
+    'IndexDocument': {'Suffix': 'index.html'},
+}
+
+bucket_website = s3.BucketWebsite(bucket_name)
+bucket_website.put(WebsiteConfiguration=website_configuration)
+
+print('Bucket created: ', bucket_name)
+print('Upload an index.html file to test it works!')
