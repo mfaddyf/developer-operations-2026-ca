@@ -4,6 +4,7 @@
 import sys
 import uuid # imported for usage in bucket naming
 import boto3
+from botocore.exceptions import ClientError, WaiterError
 
 # SETTINGS / VARIABLES --------------
 ami_id = 'ami-0fef201115eefe936'
@@ -12,8 +13,7 @@ availability_zone = 'us-east-1b'
 key_name = 'awskey'
     # preestablished security group with http + ssh allowed , refactor to create new security group & check if there's one existing already
 security_group = 'sg-0fc7eca295775e4d3'
-instance_name = 'mroche-web-server'
-
+instance_name = f'mroche-inst-{uuid.uuid4().hex[:3]}'
     # startup script - patches os installs & starts apache
 user_data = """#!/bin/bash
             yum update -y
@@ -33,7 +33,7 @@ def launch_instance():
             MinCount = 1,
             MaxCount = 1,
             InstanceType = instance_type,
-            Placement = {'AvailabilityZone': availabilty_zone},
+            Placement = {'AvailabilityZone': availability_zone},
             KeyName = key_name,
             # takes the user data from above
             UserData = user_data,
@@ -50,19 +50,22 @@ def launch_instance():
                     ]
                 }
             ])
+    except ClientError as error:
+        print('Could Not Launch Instance: ', error)
+        return None
 
-    # add in error handling !!!!!
-
-    instance = new_instance[0]
+    instance = new_instances[0]
     print('Instance Launched: ', instance.id)
+    print('Instance Name: ', instance_name)
     return instance
 
-def wait_for_instance():
+def wait_for_instance(instance):
     print('Waiting for instance to start running..!')
     try:
         instance.wait_until_running()
-
-        # add in error handling !!!!!
+    except WaiterError as error:
+        print('Instance Did Not Reach Running State: ', error)
+        return False
 
     instance.reload()
     print('Instance Running! Public IP: ', instance.public_ip_address)
@@ -75,20 +78,23 @@ def setup_bucket():
     try:
         s3.create_bucket(Bucket=bucket_name)
         print('Bucket Created: ', bucket_name)
+    except ClsientError as error:
+        print('Could Not Create Bucket: ', error)
+        return None
 
-        # add in error handling !!!!!
-
-        website_configuration = {
-            'ErrorDocument': {'Key': 'error.html'},
-            'IndexDocument': {'Suffix': 'index.html'},
-        }
+    website_configuration = {
+        'ErrorDocument': {'Key': 'error.html'},
+        'IndexDocument': {'Suffix': 'index.html'},
+    }
 
     try:
         bucket_website = s3.BucketWebsite(bucket_name)
         bucket_website.put(WebsiteConfiguration=website_configuration)
         print('Status Website Hosting Enabled!')
-
-    # add in error handling !!!!!
+    except ClientError as error:
+        print('Could Not Set Up Website Hosting: ', error)
+        return None
+        
     return bucket_name
 
 
@@ -107,5 +113,5 @@ def main():
 
     # more steps cont. here in further steps
 
-if __name__ = '__main__':
+if __name__ == '__main__':
     main()
