@@ -5,6 +5,8 @@ import sys
 import uuid # imported for usage in bucket naming
 import boto3
 from botocore.exceptions import ClientError, WaiterError
+import json
+import requests
 
 # SETTINGS / VARIABLES --------------
 ami_id = 'ami-0fef201115eefe936'
@@ -50,8 +52,23 @@ user_data = """#!/bin/bash
             <tr><th>Availability Zone</th><td>$AZ</td></tr>
             </table>
             </body></html>
-            EOF
             """
+            
+index_html = """<html>
+            <head><title>Madison's S3 Website</title></head>
+            <body style="font-family: Arial, sans-serif; margin: 40px;">
+            <h1>Madison's S3 Website</h1>
+            <img src="logo.jpg" alt="Logo">
+            </body>
+            </html>"""
+            
+error_html = """<html>
+            <body style="font-family: Arial, sans-serif; margin: 40px;">
+            <h1>Page Not Found</h1>
+            </body>
+            </html>"""
+
+
 
 ec2 = boto3.resource('ec2')
 s3 = boto3.resource('s3')
@@ -127,9 +144,66 @@ def setup_bucket():
         print('Could Not Set Up Website Hosting: ', error)
         return None
         
+        # s3 blocks public access by default - remove the block, then add a public-read policy below
+    bucket_policy = {
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Sid": "PublicReadGetObject",
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": ["s3:GetObject"],
+            "Resource": f"arn:aws:s3:::{bucket_name}/*"
+        }]
+    }
+
+    try:
+        s3.meta.client.delete_public_access_block(Bucket=bucket_name)
+        s3.Bucket(bucket_name).Policy().put(Policy=json.dumps(bucket_policy))
+        print('Bucket Made Public!')
+    except ClientError as error:
+        print('Could Not Make Bucket Public: ', error)
+        return None
+        
     return bucket_name
+    
+def download_logo():
+    try:
+        response = requests.get('http://devops.setudemo.net/logo.jpg', timeout=10)
+        response.raise_for_status()  # treats 404 etc. as an error
+    except requests.exceptions.RequestException as error:
+        print('Could Not Download Logo: ', error)
+        return False
+
+    with open('logo.jpg', 'wb') as file:  # 'wb' = write binary, since it's an image
+        file.write(response.content)
+    print('Logo Downloaded!')
+    return True
+    
+def upload_file(bucket_name, file_name, content_type):
+    # content type tells the browser to display the file instead of downloading it
+    try:
+        with open(file_name, 'rb') as file:
+            s3.Object(bucket_name, file_name).put(Body = file, ContentType = content_type)
+        print('Uploaded: ', file_name)
+        return True
+    except (ClientError, OSError) as error:
+        print('Could Not Upload', file_name, ': ', error)
+        return False
+ 
+def upload_website(bucket_name):
+    # write the html pages to local files so they can be uploaded
+    with open('index.html', 'w') as file:
+        file.write(index_html)
+    with open('error.html', 'w') as file:
+        file.write(error_html)
+ 
+    return (upload_file(bucket_name, 'logo.jpg', 'image/jpeg')
+            and upload_file(bucket_name, 'index.html', 'text/html')
+            and upload_file(bucket_name, 'error.html', 'text/html'))
 
 
+
+# MAIN ------------------------------
 def main():
     instance = launch_instance()
     if instance is None:
@@ -138,10 +212,16 @@ def main():
     bucket_name = setup_bucket()
     if bucket_name is None:
         print('S3 Setup Failed - Continuing With EC2 Setup')
+    elif not download_logo() or not upload_website(bucket_name):
+        print('S3 Website Upload Failed - Continuing With EC2 Setup')
+    else:
+        print('S3 Website: ', f'http://{bucket_name}.s3-website-us-east-1.amazonaws.com')
 
     if not wait_for_instance(instance):
         print('Remember to Terminate Instance: ', instance.id, 'In The Console!')
         sys.exit(1)
+    print('EC2 Website: ', f'http://{instance.public_ip_address}')
+    print('WARNING! : May Take A Few Minutes To Start Up!')
 
     # more steps cont. here in further steps
 

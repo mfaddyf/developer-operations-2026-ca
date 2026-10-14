@@ -1,0 +1,10 @@
+# files devops1.py generates on each run
+index.html
+error.html
+logo.jpg
+
+# never commit keys
+*.pem
+
+# python cache
+__pycache__/
