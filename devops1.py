@@ -14,12 +14,44 @@ key_name = 'awskey'
     # preestablished security group with http + ssh allowed , refactor to create new security group & check if there's one existing already
 security_group = 'sg-0fc7eca295775e4d3'
 instance_name = f'mroche-inst-{uuid.uuid4().hex[:3]}'
-    # startup script - patches os installs & starts apache
+
+    # startup script - patches os, installs & starts apache, builds index page with instance metadata
+    # includes small css styling for the table just to add a personal touch to it 
 user_data = """#!/bin/bash
             yum update -y
             yum install httpd -y
             systemctl enable httpd
-            systemctl start httpd"""
+            systemctl start httpd
+            
+            TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+            META="http://169.254.169.254/latest/meta-data"
+            INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" $META/instance-id)
+            PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" $META/public-ipv4)
+            AMI_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" $META/ami-id)
+            AZ=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" $META/placement/availability-zone)
+
+            cat <<EOF > /var/www/html/index.html
+            <html>
+            <head>
+            <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            table { border-collapse: collapse; }
+            th, td { border: 1px solid #999; padding: 8px 16px; text-align: left; }
+            th { background-color: #eee; }
+            </style>
+            </head>
+            <body>
+            <h1>Madison's DevOps Web Server</h1>
+            <h3><i>Built automatically with Python and Boto3 for DevOps Assignment 1!</i></h3>
+            <table>
+            <tr><th>Instance ID</th><td>$INSTANCE_ID</td></tr>
+            <tr><th>Public IP</th><td>$PUBLIC_IP</td></tr>
+            <tr><th>AMI ID</th><td>$AMI_ID</td></tr>
+            <tr><th>Availability Zone</th><td>$AZ</td></tr>
+            </table>
+            </body></html>
+            EOF
+            """
 
 ec2 = boto3.resource('ec2')
 s3 = boto3.resource('s3')
