@@ -52,8 +52,10 @@ user_data = """#!/bin/bash
             <tr><th>Availability Zone</th><td>$AZ</td></tr>
             </table>
             </body></html>
+            EOF
             """
             
+    # index and error pages to be created and uploaded to the s3 bucket
 index_html = """<html>
             <head><title>Madison's S3 Website</title></head>
             <body style="font-family: Arial, sans-serif; margin: 40px;">
@@ -67,8 +69,6 @@ error_html = """<html>
             <h1>Page Not Found</h1>
             </body>
             </html>"""
-
-
 
 ec2 = boto3.resource('ec2')
 s3 = boto3.resource('s3')
@@ -102,12 +102,14 @@ def launch_instance():
     except ClientError as error:
         print('Could Not Launch Instance: ', error)
         return None
-
+    
+    # printing instance name and id to the console
     instance = new_instances[0]
     print('Instance Launched: ', instance.id)
     print('Instance Name: ', instance_name)
     return instance
 
+    # waits for instance to load before printing the public ip of said instance to the terminal
 def wait_for_instance(instance):
     print('Waiting for instance to start running..!')
     try:
@@ -127,10 +129,9 @@ def setup_bucket():
     try:
         s3.create_bucket(Bucket=bucket_name)
         print('Bucket Created: ', bucket_name)
-    except ClsientError as error:
+    except ClientError as error:
         print('Could Not Create Bucket: ', error)
         return None
-
     website_configuration = {
         'ErrorDocument': {'Key': 'error.html'},
         'IndexDocument': {'Suffix': 'index.html'},
@@ -166,6 +167,8 @@ def setup_bucket():
         
     return bucket_name
     
+    
+# HELPERS -----------------------------------
 def download_logo():
     try:
         response = requests.get('http://devops.setudemo.net/logo.jpg', timeout=10)
@@ -200,7 +203,17 @@ def upload_website(bucket_name):
     return (upload_file(bucket_name, 'logo.jpg', 'image/jpeg')
             and upload_file(bucket_name, 'index.html', 'text/html')
             and upload_file(bucket_name, 'error.html', 'text/html'))
-
+            
+def print_to_file(bucket_name, instance):
+    try:
+        with open('mroche-websites.txt', 'w') as file:
+            file.write(f'S3 Website: http://{bucket_name}.s3-website-us-east-1.amazonaws.com\n')
+            file.write(f'EC2 Website: http://{instance.public_ip_address}\n')
+    except OSError as error:
+        print('Could Not Write To File: ', error)
+        return False
+    print('URLs Written To File - mroche-websites.txt!')
+    return True
 
 
 # MAIN ------------------------------
@@ -220,6 +233,7 @@ def main():
     if not wait_for_instance(instance):
         print('Remember to Terminate Instance: ', instance.id, 'In The Console!')
         sys.exit(1)
+    print_to_file(bucket_name, instance)
     print('EC2 Website: ', f'http://{instance.public_ip_address}')
     print('WARNING! : May Take A Few Minutes To Start Up!')
 
