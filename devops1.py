@@ -7,12 +7,16 @@ import boto3
 from botocore.exceptions import ClientError, WaiterError
 import json
 import requests
+import subprocess # runs terminal commands 
+import time # used to wait between ssh retries
+from datetime import datetime # using to timestamp ami name
 
 # SETTINGS / VARIABLES --------------
 ami_id = 'ami-0fef201115eefe936'
 instance_type = 't2.nano'
 availability_zone = 'us-east-1b'
 key_name = 'awskey'
+key_file = 'awskey.pem'
     # preestablished security group with http + ssh allowed , refactor to create new security group & check if there's one existing already
 security_group = 'sg-0fc7eca295775e4d3'
 instance_name = f'mroche-inst-{uuid.uuid4().hex[:3]}'
@@ -167,6 +171,71 @@ def setup_bucket():
         
     return bucket_name
     
+# MONITORING --------------------------------
+def run_monitoring(instance):
+    ip = instance.public_ip_address
+    ssh_options = f'-o StrictHostKeyChecking=no -o ConnectTimeout=10 -i {key_file}'
+
+    # ssh usually isn't ready the moment the instance says 'running', so retry the copy
+    copied = False
+    for attempt in range(1, 11):
+        if run_command(f'scp {ssh_options} monitoring.sh ec2-user@{ip}:.'):
+            copied = True
+            break
+        print(f'SSH Not Ready Yet (Attempt {attempt}/10) - Retrying In 10 Seconds...')
+        time.sleep(10)
+
+    if not copied:
+        print('Could Not Copy monitoring.sh To Instance')
+        return False
+        
+    if not run_command(f"ssh {ssh_options} ec2-user@{ip} 'chmod 700 monitoring.sh'"):
+        print('Could Not Set Permissions On monitoring.sh')
+        return False
+
+    if not run_command(f"ssh {ssh_options} ec2-user@{ip} './monitoring.sh'"):
+        print('Monitoring Script Failed')
+        return False
+
+    return True
+    
+def wait_for_web_server(instance, timeout=600):
+    # user data takes a few minutes (yum update, apache install, building the page)
+    # so keep checking the page until our own heading shows up
+    url = f'http://{instance.public_ip_address}'
+    print('Waiting For Web Server To Finish Setting Up...')
+    start = time.time()
+
+    while time.time() - start < timeout:
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200 and "Madison's DevOps Web Server" in response.text:
+                print('Web Server Is Up!')
+                return True
+        except requests.exceptions.RequestException:
+            pass # server not answering yet - just try again
+
+        print('Not Ready Yet - Checking Again In 15 Seconds...')
+        time.sleep(15)
+
+    print('Web Server Did Not Start Within', timeout, 'Seconds')
+    return False
+        
+        
+# AMI ---------------------------------------
+def create_ami(instance):
+    # name format from the spec: initials-date-microseconds e.g. MR-2026-10-16-157852
+    ami_name = f"MR-{datetime.now().strftime('%Y-%m-%d-%f')}"
+    try:
+        image = instance.create_image(Name=ami_name)
+    except ClientError as error:
+        print('Could Not Create AMI: ', error)
+        return None
+
+    print('AMI Creation Started: ', image.id)
+    print('AMI Name: ', ami_name)
+    return image
+    
     
 # HELPERS -----------------------------------
 def download_logo():
@@ -215,6 +284,12 @@ def print_to_file(bucket_name, instance):
     print('URLs Written To File - mroche-websites.txt!')
     return True
 
+def run_command(cmd):
+    # prints the command and its return code, as the tips doc recommends for debugging
+    print('Running: ', cmd)
+    result = subprocess.run(cmd, shell=True)
+    print('Return Code: ', result.returncode)
+    return result.returncode == 0
 
 # MAIN ------------------------------
 def main():
@@ -233,9 +308,22 @@ def main():
     if not wait_for_instance(instance):
         print('Remember to Terminate Instance: ', instance.id, 'In The Console!')
         sys.exit(1)
-    print_to_file(bucket_name, instance)
-    print('EC2 Website: ', f'http://{instance.public_ip_address}')
-    print('WARNING! : May Take A Few Minutes To Start Up!')
+        print_to_file(bucket_name, instance)
+
+    if not wait_for_web_server(instance):
+        print('Web Server Not Ready - Skipping Monitoring And AMI')
+        sys.exit(1)
+
+    if not run_monitoring(instance):
+        print('Monitoring Failed - Continuing...')
+    else:
+        print('Monitoring Worked!')
+
+    if create_ami(instance) is None:
+        print('AMI Creation Failed')
+        sys.exit(1)
+
+    print('All Done!')
 
     # more steps cont. here in further steps
 
