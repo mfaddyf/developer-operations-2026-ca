@@ -5,6 +5,7 @@ logo.jpg
 
 # never commit keys
 *.pem
+*.txt
 
 # python cache
 __pycache__/
