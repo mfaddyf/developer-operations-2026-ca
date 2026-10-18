@@ -17,7 +17,7 @@ import requests # used to download the logo + check the web server is up
 from botocore.exceptions import ClientError, WaiterError
 
 # SETTINGS / VARIABLES --------------
-ami_id = 'ami-0fef201115eefe936'
+ami_id = 'ami-0567589d25e06853e'
 instance_type = 't2.nano'
 availability_zone = 'us-east-1b'
 key_name = 'awskey'
@@ -26,7 +26,7 @@ key_file = 'awskey.pem'
 security_group = 'sg-0fc7eca295775e4d3'
 instance_name = f'mroche-inst-{uuid.uuid4().hex[:3]}'
 logo_url = 'http://devops.setudemo.net/logo.jpg'
-    # same ssh options used for every scp/ssh command (StrictHostKeyChecking from Assignment 1 Tips, Step 6)
+    # same ssh options used for every scp/ssh command
 ssh_options = f'-o StrictHostKeyChecking=no -o ConnectTimeout=10 -i {key_file}'
 
     # startup script - patches os, installs & starts apache, builds index page with instance metadata
@@ -90,7 +90,7 @@ cloudwatch = boto3.client('cloudwatch')
 
 
 # OUTPUT HELPERS --------------------
-# every line gets a tag so it's easy to see at a glance what worked and what didn't
+    # every line gets a tag so it's easy to see at a glance what worked and what didn't
 def heading(title):
     print(f'\n========== {title} ==========')
 
@@ -105,8 +105,9 @@ def error(message):
 
 def show_block(text):
     # indents output that came from the instance (monitoring / log report) with a | down the side
+    # the lambda makes textwrap indent blank lines too, so the | line doesn't have gaps
     if text.strip():
-        print(textwrap.indent(text.rstrip(), '           | '))
+        print(textwrap.indent(text.rstrip(), '           | ', lambda line: True))
 
 
 # EC2 -------------------------------
@@ -141,10 +142,13 @@ def launch_instance():
         error(f'Could Not Launch Instance: {err}')
         return None
 
+    # create_instances() returns a list - only one was launched, so take the first
     instance = new_instances[0]
     ok(f'Instance Launched: {instance.id} ({instance_name})')
     return instance
 
+    # waits for the instance to reach 'running', then reloads it so the public ip is    available
+    # returns True if it's running, False if the waiter gave up
 def wait_for_instance(instance):
     info('Waiting For Instance To Reach Running State...')
     try:
@@ -159,6 +163,8 @@ def wait_for_instance(instance):
 
 
 # BUCKETS ---------------------------
+    # creates the bucket, turns on static website hosting, and makes it publicly readable
+    # returns the bucket name, or None if any step failed
 def setup_bucket():
     # bucket name formatted '6randomchars-mroche'
     bucket_name = f'{uuid.uuid4().hex[:6]}-mroche'
@@ -182,7 +188,7 @@ def setup_bucket():
         error(f'Could Not Set Up Website Hosting: {err}')
         return None
 
-    # s3 blocks public access by default - remove the block, then add a public-read policy (Assignment 1 Tips, Step 4)
+    # s3 blocks public access by default - remove the block, then add a public-read policy
     bucket_policy = {
         "Version": "2012-10-17",
         "Statement": [{
@@ -206,7 +212,7 @@ def setup_bucket():
 
 
 # HELPERS ---------------------------
-# downloads the logo using the requests library: https://requests.readthedocs.io
+    # downloads the logo using the requests library: https://requests.readthedocs.io
 def download_logo():
     try:
         response = requests.get(logo_url, timeout=10)
@@ -219,9 +225,10 @@ def download_logo():
         file.write(response.content)
     ok('Logo Downloaded')
     return True
-
+    
+    #
 def upload_file(bucket_name, file_name, content_type):
-    # content type tells the browser to display the file instead of downloading it (Assignment 1 Tips, Step 4)
+    # content type tells the browser to display the file instead of downloading it
     try:
         with open(file_name, 'rb') as file:
             s3.Object(bucket_name, file_name).put(Body = file, ContentType = content_type)
@@ -231,6 +238,7 @@ def upload_file(bucket_name, file_name, content_type):
         error(f'Could Not Upload {file_name}: {err}')
         return False
 
+    # writes the two html pages to disk then uplaods with logo
 def upload_website(bucket_name):
     # write the html pages to local files so they can be uploaded
     with open('index.html', 'w') as file:
@@ -238,10 +246,12 @@ def upload_website(bucket_name):
     with open('error.html', 'w') as file:
         file.write(error_html)
 
+    # and stops at the first failed upload so the others wont complete unless they all complete
     return (upload_file(bucket_name, 'logo.jpg', 'image/jpeg')
             and upload_file(bucket_name, 'index.html', 'text/html')
             and upload_file(bucket_name, 'error.html', 'text/html'))
 
+    # writes both website urls to mroche-websites.txt
 def print_to_file(bucket_name, instance):
     try:
         with open('mroche-websites.txt', 'w') as file:
@@ -257,9 +267,9 @@ def print_to_file(bucket_name, instance):
 
 
 # MONITORING ------------------------
-# runs a terminal command from python using subprocess.run() (Assignment 1 Tips, Step 6)
-# prints the command + return code to help with debugging. output is captured so ssh's
-# warnings only get shown if the command actually fails
+    # runs a terminal command from python using subprocess.run() 
+    # prints the command + return code to help with debugging. output is captured so ssh's
+    # warnings only get shown if the command actually fails
 def run_command(cmd, show_output=False):
     print(f'  [CMD]    {cmd}')
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -270,7 +280,7 @@ def run_command(cmd, show_output=False):
         show_block(result.stderr)
     return result.returncode == 0
 
-# copies monitoring.sh to the instance, sets permissions & runs it - scp/ssh commands as per Assignment 1 Tips, Step 6
+    # copies monitoring.sh to the instance, sets permissions & runs it - scp/ssh commands
 def run_monitoring(instance):
     ip = instance.public_ip_address
 
@@ -297,7 +307,7 @@ def run_monitoring(instance):
 
     return True
 
-# copies log_report.sh to the instance and runs it - scp/ssh commands as per Assignment 1 Tips, Step 6
+# copies log_report.sh to the instance and runs it - scp/ssh commands
 def run_log_report(instance):
     ip = instance.public_ip_address
 
@@ -324,9 +334,9 @@ def run_log_report(instance):
 
 
 # CLOUDWATCH ------------------------
-# gets CPU utilisation for the instance from cloudwatch, based on:
-# https://docs.aws.amazon.com/boto3/latest/reference/services/cloudwatch/client/get_metric_statistics.html
-# https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/viewing_metrics_with_cloudwatch.html
+    # gets CPU utilisation for the instance from cloudwatch, based on:
+    # https://docs.aws.amazon.com/boto3/latest/reference/services/cloudwatch/client/get_metric_statistics.html
+    # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/viewing_metrics_with_cloudwatch.html
 def get_cpu_utilisation(instance):
     # last 30 minutes, 1 minute at a time (cloudwatch works in UTC)
     start_time = datetime.now(timezone.utc) - timedelta(minutes=30)
@@ -370,6 +380,8 @@ def get_cpu_utilisation(instance):
 
 
 # AMI -------------------------------
+    # checks the EC2 web page until the user data has finished, so the AMI isn't taken of a half-built server
+    # returns True once the page is ready, False if it times out (default 10 minutes)
 def wait_for_web_server(instance, timeout=600):
     # user data takes a few minutes (yum update, apache install, building the page)
     # so keep checking the page until our own heading shows up
@@ -391,11 +403,13 @@ def wait_for_web_server(instance, timeout=600):
     error(f'Web Server Did Not Start Within {timeout} Seconds')
     return False
 
+    # creates an AMI (saved image) of the instance (Step 7)
+    # returns "ami-id (name)" for the summary, or None if it failed
 def create_ami(instance):
     # name format from the spec: initials-date-microseconds e.g. MR-2026-10-16-157852
     ami_name = f"MR-{datetime.now().strftime('%Y-%m-%d-%f')}"
     try:
-        image = instance.create_image(Name=ami_name) # instance.create_image() as per Assignment 1 Tips, Step 7
+        image = instance.create_image(Name=ami_name) # instance.create_image()
     except ClientError as err:
         error(f'Could Not Create AMI: {err}')
         return None
@@ -406,6 +420,8 @@ def create_ami(instance):
 
 
 # MAIN ------------------------------
+    # runs each stage in order. each function handles its own errors and returns success/failure,
+    # and main() decides whether to stop (sys.exit(1)) or carry on to the next stage
 def main():
     heading('Launching EC2 Instance')
     instance = launch_instance()
