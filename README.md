@@ -1,7 +1,3 @@
-(NOTE TO MADDY: ADD IN OTHER USED REFERENCES IN SIDE DOC ON MAIN PC!!!! <br>
-to finish : review code and scripts and add additional comments etc , take out links to sources ?? <br>
-review this readme and make sure it is up to date with the draft version / og template created !! )
-
 # DevOps Assignment 1 – Automated AWS Web Server Deployment
 
 `devops1.py` is a Python 3 program that uses the Boto3 library to automate creating, launching and monitoring public-facing web servers in the Amazon cloud. A web server runs on an EC2 instance, and an S3 bucket serves static content. It runs from start to finish with no user interaction. <br> <br>
